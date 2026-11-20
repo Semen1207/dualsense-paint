@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DualSense Paint</title>
+<style>
+  :root {
+    --bg: #f3f3f3;
+    --ribbon: #ffffff;
+    --border: #e0e0e0;
+    --accent: #0067c0;
+    --accent-hover: #005a9e;
+    --text: #1a1a1a;
+  }
+  * { box-sizing: border-box; user-select: none; font-family: 'Segoe UI', system-ui, sans-serif; }
+  body { margin: 0; background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  #ribbon {
+    background: var(--ribbon);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+    z-index: 10;
+  }
+  .group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-right: 16px;
+    border-right: 1px solid var(--border);
+  }
+  .group:last-child { border-right: none; }
+  .group-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px; }
+
+  button.tool-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: 0.1s;
+  }
+  button.tool-btn:hover { background: #f0f0f0; }
+  button.tool-btn.active { background: #e5f1fb; border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
+  #connect-btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-left: auto;
+  }
+  #connect-btn:hover { background: var(--accent-hover); }
+  #connect-btn.connected { background: #107c10; }
+
+  .swatch {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px #ccc;
+    cursor: pointer;
+    transition: transform 0.1s;
+  }
+  .swatch:hover { transform: scale(1.15); }
+  .swatch.active { box-shadow: 0 0 0 2px var(--accent); transform: scale(1.15); }
+
+  input[type="range"] { width: 80px; accent-color: var(--accent); }
+
+  #workspace {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+  }
+  canvas {
+    background: #ffffff;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    border-radius: 2px;
+  }
+
+  /* Small Circle Cursor */
+  #ds-cursor {
+    position: fixed;
+    width: 14px;
+    height: 14px;
+    border: 2px solid #000;
+    background: rgba(255, 255, 255, 0.65);
+    border-radius: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    z-index: 9999;
+    display: none;
+  }
+  #ds-cursor.clicking {
+    background: rgba(0, 103, 192, 0.55);
+    border-color: var(--accent);
+    transform: translate(-50%, -50%) scale(0.85);
+  }
+
+  #statusbar {
+    background: var(--ribbon);
+    border-top: 1px solid var(--border);
+    padding: 4px 16px;
+    font-size: 12px;
+    color: #555;
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+
+<div id="ribbon">
+  <div class="group">
+    <button class="tool-btn" id="btn-undo" title="Undo (Circle)">↩ Undo</button>
+    <button class="tool-btn" id="btn-clear">🗑 Clear</button>
+    <button class="tool-btn" id="btn-save">💾 Save</button>
+  </div>
+
+  <div class="group">
+    <span class="group-label">Tools</span>
+    <button class="tool-btn active" data-tool="brush">🖌 Brush</button>
+    <button class="tool-btn" data-tool="eraser">🧽 Eraser</button>
+    <button class="tool-btn" data-tool="line">📏 Line</button>
+    <button class="tool-btn" data-tool="rect">⬜ Rect</button>
+    <button class="tool-btn" data-tool="circle">⭕ Circle</button>
+  </div>
+
+  <div class="group">
+    <span class="group-label">Size</span>
+    <input type="range" id="size-slider" min="1" max="50" value="6">
+    <span id="size-label" style="font-size:12px; width:24px;">6px</span>
+  </div>
+
+  <div class="group" id="palette">
+    <span class="group-label">Colors</span>
+  </div>
+
+  <button id="connect-btn">🎮 Connect DualSense</button>
+</div>
+
+<div id="workspace">
+  <canvas id="canvas" width="1100" height="650"></canvas>
+</div>
+
+<div id="statusbar">
+  <span id="status-text">Status: Click "Connect DualSense" (Touchpad = Move, Touchpad Click = Draw/Select, Circle = Undo)</span>
+  <span id="coords-text">X: 0, Y: 0 | 0 pkt/s</span>
+</div>
+
+<div id="ds-cursor"></div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+const cursorEl = document.getElementById('ds-cursor');
+const connectBtn = document.getElementById('connect-btn');
+const statusText = document.getElementById('status-text');
+const coordsText = document.getElementById('coords-text');
+
+// Paint State
+let tool = 'brush';
+let color = '#000000';
+let brushSize = 6;
+let isDrawing = false;
+let startX = 0, startY = 0;
+let snapshot = null;
+let undoStack = [];
+
+// DualSense Cursor State
+let cursorX = window.innerWidth / 2;
+let cursorY = window.innerHeight / 2;
+let prevTouchActive = false;
+let prevTouchX = 0;
+let prevTouchY = 0;
+let prevClick = false;
+let prevCircleBtn = false;
+let packetCount = 0;
+let currentPps = 0;
+const SENSITIVITY = 0.65;
+
+// Initialize White Canvas
+ctx.fillStyle = '#ffffff';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+saveUndo();
+
+// Setup Color Palette
+const colors = ['#000000', '#7f7f7f', '#880015', '#ed1c24', '#ff7f27', '#fff200', '#22b14c', '#00a2e8', '#3f48cc', '#a349a4', '#ffffff'];
+const paletteEl = document.getElementById('palette');
+colors.forEach((c, idx) => {
+  const sw = document.createElement('div');
+  sw.className = 'swatch' + (idx === 0 ? ' active' : '');
+  sw.style.background = c;
+  sw.dataset.color = c;
+  sw.onclick = () => selectColor(c, sw);
+  paletteEl.appendChild(sw);
+});
+
+function selectColor(c, el) {
+  color = c;
+  document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
+  if (el) el.classList.add('active');
+  if (tool === 'eraser') selectTool('brush');
+}
+
+function selectTool(t) {
+  tool = t;
+  document.querySelectorAll('[data-tool]').forEach(b => {
+    b.classList.toggle('active', b.dataset.tool === t);
+  });
+}
+
+document.querySelectorAll('[data-tool]').forEach(btn => {
+  btn.onclick = () => selectTool(btn.dataset.tool);
+});
+
+const sizeSlider = document.getElementById('size-slider');
+const sizeLabel = document.getElementById('size-label');
+sizeSlider.oninput = (e) => {
+  brushSize = parseInt(e.target.value, 10);
+  sizeLabel.textContent = brushSize + 'px';
+  updateCursorSize();
+};
+
+function updateCursorSize() {
+  const displaySize = Math.max(10, brushSize);
+  cursorEl.style.width = displaySize + 'px';
+  cursorEl.style.height = displaySize + 'px';
+}
+
+// Undo / Clear / Save
+function saveUndo() {
+  if (undoStack.length > 20) undoStack.shift();
+  undoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+}
+
+function undo() {
+  if (undoStack.length > 1) {
+    undoStack.pop();
+    ctx.putImageData(undoStack.at(-1), 0, 0);
+  }
+}
+
+document.getElementById('btn-undo').onclick = undo;
+document.getElementById('btn-clear').onclick = () => {
+  saveUndo();
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+};
+document.getElementById('btn-save').onclick = () => {
+  const link = document.createElement('a');
+  link.download = 'dualsense-art.png';
+  link.href = canvas.toDataURL();
+  link.click();
+};
+
+// Drawing Engine (Unified for Touchpad Click / LMB)
+function handlePointerDown(clientX, clientY) {
+  const el = document.elementFromPoint(clientX, clientY);
+  if (el && el !== canvas && !el.contains(canvas)) {
+    if (el.tagName === 'INPUT' && el.type === 'range') {
+      adjustSliderAt(el, clientX);
+    } else {
+      el.click();
+    }
+    return;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return;
+
+  isDrawing = true;
+  startX = clientX - rect.left;
+  startY = clientY - rect.top;
+  snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = brushSize;
+  ctx.strokeStyle = tool === 'eraser' ? '#ffffff' : color;
+
+  if (tool === 'brush' || tool === 'eraser') {
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(startX, startY);
+    ctx.stroke();
+  }
+}
+
+function handlePointerMove(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.max(0, Math.min(canvas.width, clientX - rect.left));
+  const y = Math.max(0, Math.min(canvas.height, clientY - rect.top));
+  coordsText.textContent = `X: ${Math.round(x)}, Y: ${Math.round(y)} | ${currentPps} pkt/s`;
+
+  if (!isDrawing && prevClick) {
+    const el = document.elementFromPoint(clientX, clientY);
+    if (el && el.tagName === 'INPUT' && el.type === 'range') {
+      adjustSliderAt(el, clientX);
+    }
+    return;
+  }
+
+  if (!isDrawing) return;
+
+  if (tool === 'brush' || tool === 'eraser') {
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  } else {
+    ctx.putImageData(snapshot, 0, 0);
+    ctx.beginPath();
+    if (tool === 'line') {
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(x, y);
+    } else if (tool === 'rect') {
+      ctx.strokeRect(startX, startY, x - startX, y - startY);
+      return;
+    } else if (tool === 'circle') {
+      const r = Math.hypot(x - startX, y - startY);
+      ctx.arc(startX, startY, r, 0, Math.PI * 2);
+    }
+    ctx.stroke();
+  }
+}
+
+function handlePointerUp() {
+  if (isDrawing) {
+    isDrawing = false;
+    saveUndo();
+  }
+}
+
+function adjustSliderAt(slider, clientX) {
+  const rect = slider.getBoundingClientRect();
+  const min = Number(slider.min);
+  const max = Number(slider.max);
+  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  slider.value = Math.round(min + ratio * (max - min));
+  slider.dispatchEvent(new Event('input'));
+}
+
+// CRC32 Table for Bluetooth 0x31 Output Reports (0xA2 prefix)
+const crcTable = new Uint32Array(256);
+for (let i = 0; i < 256; i++) {
+  let c = i;
+  for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+  crcTable.set([c], i);
+}
+function computeCrc32(prefixByte, buffer) {
+  let crc = 0xffffffff;
+  crc = crcTable.at((crc ^ prefixByte) & 0xff) ^ (crc >>> 8);
+  for (let i = 0; i < buffer.length - 4; i++) {
+    crc = crcTable.at((crc ^ buffer.at(i)) & 0xff) ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+// Send Lightbar RGB
+let btSeq = 0;
+async function sendLightbar(device, isBt, r, g, b) {
+  try {
+    if (!isBt) {
+      const out = new Uint8Array(47);
+      out.set([0x02, 0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, r, g, b], 0);
+      await device.sendReport(0x02, out);
+    } else {
+      const out = new Uint8Array(77);
+      out.set([(btSeq << 4), 0x02, 0x04], 0);
+      out.set([r, g, b], 45);
+      btSeq = (btSeq + 1) & 0x0f;
+      const crc = computeCrc32(0xa2, out);
+      new DataView(out.buffer).setUint32(73, crc, true);
+      await device.sendReport(0x31, out);
+    }
+  } catch (_) {}
+}
+
+setInterval(() => {
+  currentPps = packetCount;
+  packetCount = 0;
+}, 1000);
+
+// WebHID DualSense Connection
+connectBtn.onclick = async () => {
+  if (!('hid' in navigator)) {
+    statusText.textContent = 'Error: WebHID not supported. Open this file in Chrome or Edge.';
+    return;
+  }
+
+  try {
+    const devices = await navigator.hid.requestDevice({
+      filters: [
+        { vendorId: 0x054c, productId: 0x0ce6 },
+        { vendorId: 0x054c, productId: 0x0df2 }
+      ]
+    });
+
+    const device = devices.at(0);
+    if (!device) {
+      statusText.textContent = 'Status: No DualSense selected.';
+      return;
+    }
+
+    if (!device.opened) {
+      await device.open();
+    }
+
+    try {
+      await device.receiveFeatureReport(0x05);
+    } catch (_) {}
+
+    let isBt = false;
+    connectBtn.textContent = '✅ DualSense Connected';
+    connectBtn.classList.add('connected');
+    statusText.textContent = 'Connected: ' + device.productName + ' | Touchpad = Move | Click Touchpad = Draw/Select | Cross = Undo';
+
+    cursorEl.style.display = 'block';
+    cursorEl.style.left = cursorX + 'px';
+    cursorEl.style.top = cursorY + 'px';
+    updateCursorSize();
+
+    device.addEventListener('inputreport', (event) => {
+      packetCount++;
+      const { data, reportId } = event;
+
+      isBt = (reportId === 0x31 || data.byteLength >= 77);
+      const offset = isBt ? 1 : 0;
+      if (data.byteLength < 36 + offset) return;
+
+      const buttons1 = data.getUint8(7 + offset);
+      const circlePressed = (buttons1 & 0x20) !== 0;
+      if (circlePressed && !prevCircleBtn) undo();
+      prevCircleBtn = circlePressed;
+
+      const buttons3 = data.getUint8(9 + offset);
+      const touchpadClicked = (buttons3 & 0x02) !== 0;
+
+      const touch0Info = data.getUint8(32 + offset);
+      const touchActive = (touch0Info & 0x80) === 0;
+
+      if (touchActive) {
+        const b0 = data.getUint8(33 + offset);
+        const b1 = data.getUint8(34 + offset);
+        const b2 = data.getUint8(35 + offset);
+
+        const touchX = ((b1 & 0x0f) << 8) | b0;
+        const touchY = (b2 << 4) | ((b1 & 0xf0) >> 4);
+
+        if (prevTouchActive) {
+          const dx = (touchX - prevTouchX) * SENSITIVITY;
+          const dy = (touchY - prevTouchY) * SENSITIVITY;
+
+          cursorX = Math.max(0, Math.min(window.innerWidth, cursorX + dx));
+          cursorY = Math.max(0, Math.min(window.innerHeight, cursorY + dy));
+
+          cursorEl.style.left = cursorX + 'px';
+          cursorEl.style.top = cursorY + 'px';
+
+          handlePointerMove(cursorX, cursorY);
+        }
+        prevTouchX = touchX;
+        prevTouchY = touchY;
+      }
+      prevTouchActive = touchActive;
+
+      if (touchpadClicked && !prevClick) {
+        cursorEl.classList.add('clicking');
+        sendLightbar(device, isBt, 255, 0, 0);
+        handlePointerDown(cursorX, cursorY);
+      } else if (!touchpadClicked && prevClick) {
+        cursorEl.classList.remove('clicking');
+        sendLightbar(device, isBt, 0, 103, 192);
+        handlePointerUp();
+      }
+      prevClick = touchpadClicked;
+    });
+  } catch (err) {
+    statusText.textContent = 'Connection Error: ' + err.message;
+    console.error('DualSense connection error:', err);
+  }
+};
+</script>
+</body>
+</html>
