@@ -1,6 +1,6 @@
 # dualsense-paint
 
-A zero-dependency **Modern MS Paint** clone controlled via the **Sony DualSense** touchpad using **WebHID**. Open the HTML file in a browser, connect your controller, and draw.
+A zero-dependency **Modern MS Paint** clone controlled via the **Sony DualSense 5** (or the **Sony DualSense Edge**) touchpad using **WebHID**. Open the HTML file in a browser, connect your controller, and draw.
 ![A humble drawing with the DualSense](ds5.jpg)
 
 ## Quick Start
