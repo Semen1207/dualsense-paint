@@ -5,7 +5,7 @@ A zero-dependency **Modern MS Paint** clone controlled via the **Sony DualSense 
 
 ## Quick Start
 
-1. Open the link "" in **Google Chrome** or **Microsoft Edge**.
+1. Open the link "https://semen1207.github.io/dualsense-paint/" in **Google Chrome** or **Microsoft Edge**.
 2. Connect your DualSense via **USB-C** or **Bluetooth** (close background apps like Steam Input or DS4Windows first).
 3. Click **Connect DualSense** in the top-right and select *Wireless Controller*.
 
